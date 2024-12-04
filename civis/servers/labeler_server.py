@@ -6,6 +6,7 @@ from bokeh.models import HoverTool, ColumnDataSource, Slider, Button, TextInput,
 from bokeh.layouts import column, row
 import json
 import h5py
+import tifffile
 import os
 from pathlib import Path
 
@@ -46,6 +47,7 @@ def load_data(filename):
 def labeler_bkapp(doc):
     global C, C_raw, ids, labels, image_source, session_name, C_denoised, C_deconvolved, C_reraw
     filename = ''
+    imgname = ''
     labels = np.zeros((3, 3), dtype=bool)
     labels[:, 2] = True
 
@@ -99,7 +101,7 @@ def labeler_bkapp(doc):
     # spatial image
     spatial = figure(title="Neuronal Segmentation", width=800, height=800,
                      active_scroll='wheel_zoom', tools=TOOLS)
-    spatial.image(image='image', x=0, y=0, dw=100, dh=100, source=image_source)
+    spatial.image_rgba(image='image', x=0, y=0, dw=100, dh=100, source=image_source)
 
     contour_renderer = spatial.patches(xs='xs', ys='ys', source=spatial_source,
                                        fill_alpha=0.4, fill_color='colors', line_color='colors')
@@ -349,6 +351,14 @@ def labeler_bkapp(doc):
     sessionname_input = TextInput(value=filename, title="SessionName:", width=400)
     load_data_button = Button(label="Load Data", button_type="success")
 
+    # Image input
+    imgname_input = TextInput(value=imgname, title="Image File:", width=400)
+    load_img_button = Button(label="Load TIFF file", button_type="success")
+    load_original_button = Button(label="Load Original TIFF file", button_type="success")
+
+    img_x_slider = Slider(start=-500, end=500, value=0, step=1, width=600, title="Neuron ID", disabled=True)
+    img_y_slider = Slider(start=-500, end=500, value=0, step=1, width=600, title="Neuron ID", disabled=True)
+
     def load_and_update_data(filename):
         global C, C_raw, ids, labels, image_source, C_denoised, C_deconvolved, C_reraw
         neuron_id_slider.disabled = False
@@ -365,72 +375,82 @@ def labeler_bkapp(doc):
         file_path_input.disabled = False
 
         # Load the data
-        [C, C_raw, Cn, ids, Coor, centroids, virmenPath, C_denoised, C_deconvolved, C_reraw] = load_data(filename)
-        num_shapes = len(Coor)
-        height, width = Cn.shape[:2]
-        labels = np.zeros((len(C), 3), dtype=bool)
-        labels[:, 2] = True
+        try:
+            [C, C_raw, Cn, ids, Coor, centroids, virmenPath, C_denoised, C_deconvolved, C_reraw] = load_data(filename)
+            num_shapes = len(Coor)
+            height, width = Cn.shape[:2]
+            labels = np.zeros((len(C), 3), dtype=bool)
+            labels[:, 2] = True
 
-        # Prepare data for Bokeh
-        x_positions_all = []
-        y_positions_all = []
+            # Prepare data for Bokeh
+            x_positions_all = []
+            y_positions_all = []
 
-        for i in range(num_shapes):
-            x_positions = Coor[i][0]
-            y_positions = Coor[i][1]
+            for i in range(num_shapes):
+                x_positions = Coor[i][0]
+                y_positions = Coor[i][1]
 
-            # Close the shape by ensuring the first point is repeated at the end
-            x_positions_all.append(x_positions)
-            y_positions_all.append(y_positions)
+                # Close the shape by ensuring the first point is repeated at the end
+                x_positions_all.append(x_positions)
+                y_positions_all.append(y_positions)
 
-        y_positions_all = [[height - y for y in y_list] for y_list in y_positions_all]
+            y_positions_all = [[height - y for y in y_list] for y_list in y_positions_all]
 
-        colors = [custom_bright_colors[i % len(custom_bright_colors)] for i in range(num_shapes)]
+            colors = [custom_bright_colors[i % len(custom_bright_colors)] for i in range(num_shapes)]
 
-        # Update spatial_source with new data
-        spatial_source.data = {
-            'xs': x_positions_all,
-            'ys': y_positions_all,
-            'id': ids,
-            'colors': [colors[i % len(colors)] for i in range(num_shapes)],  # Re-use or update colors as needed
-        }
+            # Update spatial_source with new data
+            spatial_source.data = {
+                'xs': x_positions_all,
+                'ys': y_positions_all,
+                'id': ids,
+                'colors': [colors[i % len(colors)] for i in range(num_shapes)],  # Re-use or update colors as needed
+            }
 
-        # Update temporal_source with data from the first neuron as a default view
-        temporal_source.data = {
-            'x': np.arange(0, len(C[0]) / 20, 0.05),
-            'y_lowpass': C[0],
-            'y_raw': C_raw[0],
-            'y_denoised': C_denoised[0],
-            'y_deconvolved': C_deconvolved[0],
-            'y_reraw': C_reraw[0]
-        }
+            # Update temporal_source with data from the first neuron as a default view
+            temporal_source.data = {
+                'x': np.arange(0, len(C[0]) / 20, 0.05),
+                'y_lowpass': C[0],
+                'y_raw': C_raw[0],
+                'y_denoised': C_denoised[0],
+                'y_deconvolved': C_deconvolved[0],
+                'y_reraw': C_reraw[0]
+            }
 
-        # Reset or update additional widgets and plot properties
-        neuron_id_slider.start = np.min(ids)
-        neuron_id_slider.end = np.max(ids)
-        neuron_id_slider.value = 0  # Reset to first neuron
-        neuron_index_input.value = '0'  # Reset input box to first neuron
-        update_button_styles()  # Call function to reset button styles if defined
-        update_labeled_count()  # Reset label counts
-        update_dropdowns()  # Update dropdown menus for labels
+            # Reset or update additional widgets and plot properties
+            neuron_id_slider.start = np.min(ids)
+            neuron_id_slider.end = np.max(ids)
+            neuron_id_slider.value = 0  # Reset to first neuron
+            neuron_index_input.value = '0'  # Reset input box to first neuron
+            update_button_styles()  # Call function to reset button styles if defined
+            update_labeled_count()  # Reset label counts
+            update_dropdowns()  # Update dropdown menus for labels
 
-        # Update images and titles as needed
-        image_source.data = {'image': [np.flipud(Cn)]}
-        spatial.image(image='image', x=0, y=0, dw=width, dh=height, source=image_source)
-        spatial.x_range.start = 0
-        spatial.x_range.end = width
-        spatial.y_range.start = 0
-        spatial.y_range.end = height
-        contour_renderer = spatial.patches(xs='xs', ys='ys', source=spatial_source,
-                                           fill_alpha=0.4, fill_color='colors', line_color='colors')
+            # Update images and titles as needed
+            if image_source.data['image']==[]:
+                # converts grayscale to RGBA to use with image_rgba
+                gray = Cn
+                gray_min, gray_max = gray.min(), gray.max()
+                normalized_gray = (255 * (gray - gray_min) / (gray_max - gray_min)).astype(np.uint8)
+                normalized_gray = np.stack([normalized_gray] * 3 + [np.full(normalized_gray.shape, 255)], axis=-1)
+                gray_rgb = np.flipud(normalized_gray).astype(np.uint8).view(np.uint32).reshape(normalized_gray.shape[:2])
+                image_source.data = {'image': [gray_rgb]}
+            spatial.image_rgba(image='image', x=0, y=0, dw=width, dh=height, source=image_source)
+            spatial.x_range.start = 0
+            spatial.x_range.end = width
+            spatial.y_range.start = 0
+            spatial.y_range.end = height
+            contour_renderer = spatial.patches(xs='xs', ys='ys', source=spatial_source,
+                                               fill_alpha=0.4, fill_color='colors', line_color='colors')
 
-        spatial.title.text = "Neuronal Segmentation"
-        temporal1.title.text = "Temporal Activity: Neuron 0"
-        temporal2.title.text = "Temporal Activity: Neuron 0"
+            spatial.title.text = "Neuronal Segmentation"
+            temporal1.title.text = "Temporal Activity: Neuron 0"
+            temporal2.title.text = "Temporal Activity: Neuron 0"
 
-        # Ensure the plots and UI components are updated correctly
-        doc.title = f"Data Loaded: {filename}"  # Update document title with new filename
-
+            # Ensure the plots and UI components are updated correctly
+            doc.title = f"Data Loaded: {filename}"  # Update document title with new filename
+            print(filename + " loaded!")
+        except Exception as e:
+            print("Session not found")
     # Callback function for the "Load Data" button to reload and update the visualization
     def update_data():
         global session_name
@@ -440,9 +460,25 @@ def labeler_bkapp(doc):
         session_name = sessionname_input.value
         neuron_path = config['ProcessedFilePath'] + session_name + '/' + session_name + '_v7.mat'
         load_and_update_data(neuron_path)
-        print(neuron_path + " loaded!")
+    def update_img():
+        img_file = imgname_input.value
+        try:
+            img = tifffile.imread(img_file)
+
+            img = np.stack([img] * 3 + [np.full(img.shape, 255)], axis=-1)  # converts grey scale into one chanel to read
+
+            # Convert to the 32-bit format Bokeh expects
+            rgba_img = np.fliplr(np.flipud(img)).astype(np.uint8).view(np.uint32).reshape(img.shape[:2])
+            image_source.data = {'image': [np.fliplr(np.transpose(rgba_img))]}
+            print("image loaded")
+        except:
+            print (e)
+            print('TIFF file not found')
+
+
 
     load_data_button.on_click(update_data)
+    load_img_button.on_click(update_img)
 
     """
     ========================================================================================================================
@@ -453,10 +489,18 @@ def labeler_bkapp(doc):
     spacer2 = Spacer(height=20)
     spacer3 = Spacer(width=20)
 
+
+
+
     choose_file = row(spacer3, sessionname_input, column(spacer2, load_data_button))
+    load_file_tab = TabPanel(child=choose_file, title="Load File")
+
+    choose_img = row(spacer3, imgname_input, spacer2, column(spacer2, load_img_button))
+    load_img_tab = TabPanel(child=choose_img, title="Load Image")
+
+    load_tab = Tabs(tabs=[load_file_tab, load_img_tab])
 
     controls = row(spacer3, column(spacer1, row(previous_button, next_button, neuron_index_input), neuron_id_slider))
-
     labelling = row(spacer3, column(
         row(keep_button, discard_button, unlabeled_button),
         row(file_path_input, column(spacer2, save_labels_button)),
@@ -466,7 +510,7 @@ def labeler_bkapp(doc):
 
     temporal = Tabs(tabs=[temporal_tab1, temporal_tab2])
 
-    layout = row(spatial, column(choose_file, controls, temporal, labelling, menus))
+    layout = row(spatial, column(load_tab, controls, temporal, labelling, menus))
 
     doc.add_root(layout)
 
