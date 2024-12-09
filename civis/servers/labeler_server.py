@@ -472,7 +472,6 @@ def labeler_bkapp(doc):
             image_source.data = {'image': [np.fliplr(np.transpose(rgba_img))]}
             print("image loaded")
         except:
-            print (e)
             print('TIFF file not found')
 
 
